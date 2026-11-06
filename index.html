@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>求人票スキルギャップチェックリスト生成</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-white min-h-screen">
+<div class="max-w-2xl mx-auto px-4 py-6">
+  <h1 class="text-2xl font-bold text-center text-purple-400 mb-1">🎯 スキルギャップ分析</h1>
+  <p class="text-center text-gray-400 text-sm mb-4">求人票のスキル要件を入力して充足率を分析</p>
+
+  <!-- Job Listings Selector -->
+  <div class="bg-gray-800 rounded-xl p-4 mb-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-gray-300">求人票</h2>
+      <button onclick="newJob()" class="px-3 py-1 bg-purple-600 hover:bg-purple-500 rounded text-xs" aria-label="新規求人追加">＋ 新規追加</button>
+    </div>
+    <div id="job-tabs" class="flex gap-2 flex-wrap mb-3"></div>
+
+    <div id="job-form">
+      <div class="mb-3">
+        <label class="block text-xs text-gray-400 mb-1" for="job-title">求人タイトル</label>
+        <input type="text" id="job-title" placeholder="例: フロントエンドエンジニア" oninput="saveCurrentJob()"
+          class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-400"
+          aria-label="求人タイトル">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1" for="required-skills">必須スキル（1行1スキル）</label>
+          <textarea id="required-skills" rows="6" placeholder="React&#10;TypeScript&#10;REST API設計&#10;Git" oninput="saveCurrentJob()"
+            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-purple-400 resize-none"
+            aria-label="必須スキル"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1" for="preferred-skills">歓迎スキル（1行1スキル）</label>
+          <textarea id="preferred-skills" rows="6" placeholder="Next.js&#10;AWS&#10;GraphQL&#10;Figma" oninput="saveCurrentJob()"
+            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-purple-400 resize-none"
+            aria-label="歓迎スキル"></textarea>
+        </div>
+      </div>
+      <button onclick="generateChecklist()" class="mt-3 w-full py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-semibold" aria-label="チェックリスト生成">📋 チェックリスト生成</button>
+    </div>
+  </div>
+
+  <!-- Checklist -->
+  <div id="checklist-section" class="hidden">
+    <!-- Summary -->
+    <div class="bg-gray-800 rounded-xl p-4 mb-4">
+      <div class="grid grid-cols-3 gap-3 mb-3 text-center">
+        <div class="bg-purple-900 rounded-lg p-2">
+          <div class="text-xs text-purple-300">必須充足率</div>
+          <div id="req-rate" class="text-xl font-bold text-white">—</div>
+        </div>
+        <div class="bg-blue-900 rounded-lg p-2">
+          <div class="text-xs text-blue-300">歓迎充足率</div>
+          <div id="pref-rate" class="text-xl font-bold text-white">—</div>
+        </div>
+        <div class="rounded-lg p-2" id="possibility-box">
+          <div class="text-xs mb-1">合格可能性</div>
+          <div id="possibility" class="text-xl font-bold">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skill Checklist -->
+    <div class="bg-gray-800 rounded-xl p-4 mb-4">
+      <h2 class="text-sm font-semibold text-gray-300 mb-3">必須スキル評価</h2>
+      <div id="req-checklist" class="space-y-2 mb-4"></div>
+      <h2 class="text-sm font-semibold text-gray-300 mb-3">歓迎スキル評価</h2>
+      <div id="pref-checklist" class="space-y-2"></div>
+    </div>
+
+    <!-- Action Plan -->
+    <div class="bg-gray-800 rounded-xl p-4 mb-4">
+      <h2 class="text-sm font-semibold text-gray-300 mb-3">🚀 習得優先スキル TOP3</h2>
+      <div id="action-plan" class="space-y-2"></div>
+    </div>
+
+    <!-- Export -->
+    <button onclick="exportMarkdown()" class="w-full py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm mb-4" aria-label="Markdownエクスポート">📄 Markdownエクスポート</button>
+  </div>
+</div>
+
+<script>
+const STATUS_OPTIONS = [
+  {value:'have', label:'✅ 持っている', color:'bg-green-700'},
+  {value:'learning', label:'🔄 学習中', color:'bg-yellow-700'},
+  {value:'missing', label:'❌ 持っていない', color:'bg-red-700'},
+];
+
+let jobs = JSON.parse(localStorage.getItem('skill-gap-jobs') || '[]');
+let currentJobIndex = 0;
+
+function saveCurrentJob() {
+  if (jobs.length === 0) return;
+  jobs[currentJobIndex].title = document.getElementById('job-title').value;
+  jobs[currentJobIndex].required = document.getElementById('required-skills').value;
+  jobs[currentJobIndex].preferred = document.getElementById('preferred-skills').value;
+  localStorage.setItem('skill-gap-jobs', JSON.stringify(jobs));
+  renderTabs();
+}
+
+function newJob() {
+  jobs.push({title:'新規求人', required:'', preferred:'', skills:{}});
+  currentJobIndex = jobs.length - 1;
+  localStorage.setItem('skill-gap-jobs', JSON.stringify(jobs));
+  renderTabs();
+  loadJob();
+  document.getElementById('checklist-section').classList.add('hidden');
+}
+
+function loadJob() {
+  const job = jobs[currentJobIndex];
+  document.getElementById('job-title').value = job.title || '';
+  document.getElementById('required-skills').value = job.required || '';
+  document.getElementById('preferred-skills').value = job.preferred || '';
+}
+
+function renderTabs() {
+  const container = document.getElementById('job-tabs');
+  while (container.firstChild) container.removeChild(container.firstChild);
+  jobs.forEach((j, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'px-3 py-1 rounded text-xs ' + (i === currentJobIndex ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600');
+    btn.textContent = j.title || '未設定' + (i+1);
+    btn.setAttribute('aria-label', (j.title || '求人') + 'を選択');
+    btn.onclick = () => { currentJobIndex = i; renderTabs(); loadJob(); document.getElementById('checklist-section').classList.add('hidden'); };
+    container.appendChild(btn);
+    if (jobs.length > 1) {
+      const del = document.createElement('button');
+      del.className = 'text-red-400 hover:text-red-300 text-xs ml-1';
+      del.textContent = '✕';
+      del.setAttribute('aria-label', '求人削除');
+      del.onclick = (e) => { e.stopPropagation(); jobs.splice(i, 1); if (currentJobIndex >= jobs.length) currentJobIndex = jobs.length - 1; localStorage.setItem('skill-gap-jobs', JSON.stringify(jobs)); renderTabs(); if (jobs.length > 0) loadJob(); };
+      btn.appendChild(del);
+    }
+  });
+}
+
+function generateChecklist() {
+  saveCurrentJob();
+  const job = jobs[currentJobIndex];
+  const required = (job.required || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const preferred = (job.preferred || '').split('\n').map(s => s.trim()).filter(Boolean);
+  if (!job.skills) job.skills = {};
+
+  document.getElementById('checklist-section').classList.remove('hidden');
+  renderChecklist('req-checklist', required, 'req');
+  renderChecklist('pref-checklist', preferred, 'pref');
+  updateStats();
+}
+
+function renderChecklist(containerId, skills, prefix) {
+  const container = document.getElementById(containerId);
+  while (container.firstChild) container.removeChild(container.firstChild);
+  const job = jobs[currentJobIndex];
+
+  skills.forEach((skill, i) => {
+    const key = prefix + '-' + i;
+    if (!job.skills[key]) job.skills[key] = 'missing';
+
+    const div = document.createElement('div');
+    div.className = 'flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-2';
+
+    const name = document.createElement('span');
+    name.className = 'flex-1 text-sm text-white';
+    name.textContent = skill;
+
+    const sel = document.createElement('select');
+    sel.className = 'bg-gray-600 border border-gray-500 rounded px-2 py-1 text-xs focus:outline-none';
+    sel.setAttribute('aria-label', skill + 'の自己評価');
+    STATUS_OPTIONS.forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.value === job.skills[key]) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.onchange = () => {
+      job.skills[key] = sel.value;
+      localStorage.setItem('skill-gap-jobs', JSON.stringify(jobs));
+      updateStats();
+    };
+
+    div.appendChild(name);
+    div.appendChild(sel);
+    container.appendChild(div);
+  });
+
+  if (skills.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'text-xs text-gray-500';
+    p.textContent = 'スキルが設定されていません';
+    container.appendChild(p);
+  }
+}
+
+function updateStats() {
+  const job = jobs[currentJobIndex];
+  const required = (job.required || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const preferred = (job.preferred || '').split('\n').map(s => s.trim()).filter(Boolean);
+
+  const reqHave = required.filter((_, i) => job.skills['req-' + i] === 'have' || job.skills['req-' + i] === 'learning').length;
+  const prefHave = preferred.filter((_, i) => job.skills['pref-' + i] === 'have' || job.skills['pref-' + i] === 'learning').length;
+
+  const reqRate = required.length > 0 ? Math.round(reqHave / required.length * 100) : 0;
+  const prefRate = preferred.length > 0 ? Math.round(prefHave / preferred.length * 100) : 0;
+
+  document.getElementById('req-rate').textContent = reqRate + '%';
+  document.getElementById('pref-rate').textContent = prefRate + '%';
+
+  let possibility, posColor, posBox;
+  if (reqRate >= 80) { possibility = '高 🟢'; posColor = 'text-green-400'; posBox = 'bg-green-900'; }
+  else if (reqRate >= 50) { possibility = '中 🟡'; posColor = 'text-yellow-400'; posBox = 'bg-yellow-900'; }
+  else { possibility = '低 🔴'; posColor = 'text-red-400'; posBox = 'bg-red-900'; }
+
+  document.getElementById('possibility').textContent = possibility;
+  document.getElementById('possibility').className = 'text-xl font-bold ' + posColor;
+  document.getElementById('possibility-box').className = 'rounded-lg p-2 ' + posBox;
+
+  // Action plan
+  const missing = required.filter((s, i) => job.skills['req-' + i] === 'missing').slice(0, 3);
+  const ap = document.getElementById('action-plan');
+  while (ap.firstChild) ap.removeChild(ap.firstChild);
+  if (missing.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'text-sm text-green-400';
+    p.textContent = '✅ 必須スキルを全て満たしています！';
+    ap.appendChild(p);
+  } else {
+    missing.forEach((skill, i) => {
+      const div = document.createElement('div');
+      div.className = 'flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-2 text-sm';
+      const rank = document.createElement('span');
+      rank.className = 'text-purple-400 font-bold w-6';
+      rank.textContent = (i + 1) + '.';
+      const name = document.createElement('span');
+      name.textContent = skill;
+      div.appendChild(rank);
+      div.appendChild(name);
+      ap.appendChild(div);
+    });
+  }
+}
+
+function exportMarkdown() {
+  const job = jobs[currentJobIndex];
+  const title = job.title || '求人';
+  const required = (job.required || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const preferred = (job.preferred || '').split('\n').map(s => s.trim()).filter(Boolean);
+
+  const statusLabel = {have:'✅ 持っている', learning:'🔄 学習中', missing:'❌ 持っていない'};
+
+  let md = '# スキルギャップ分析: ' + title + '\n\n';
+  md += '## 必須スキル\n\n';
+  required.forEach((s, i) => {
+    md += '- ' + (statusLabel[job.skills['req-' + i]] || '❌') + ' ' + s + '\n';
+  });
+  md += '\n## 歓迎スキル\n\n';
+  preferred.forEach((s, i) => {
+    md += '- ' + (statusLabel[job.skills['pref-' + i]] || '❌') + ' ' + s + '\n';
+  });
+
+  const blob = new Blob([md], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'skill-gap.md';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+if (jobs.length === 0) newJob();
+else { renderTabs(); loadJob(); }
+</script>
+</body>
+</html>
